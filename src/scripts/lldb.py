@@ -10,17 +10,17 @@ def connect_command(debugger, command, result, internal_dict):
     # These two are passed in by the script which loads us
     connect_url = internal_dict['fruitstrap_connect_url']
     error = lldb.SBError()
-    
+
     # We create a new listener here and will use it for both target and the process.
     # It allows us to prevent data races when both our code and internal lldb code
     # try to process STDOUT/STDERR messages
     global listener
     listener = lldb.SBListener('iosdeploy_listener')
-    
+
     listener.StartListeningForEventClass(debugger,
                                             lldb.SBTarget.GetBroadcasterClassName(),
                                             lldb.SBProcess.eBroadcastBitStateChanged | lldb.SBProcess.eBroadcastBitSTDOUT | lldb.SBProcess.eBroadcastBitSTDERR)
-    
+
     process = lldb.target.ConnectRemote(listener, connect_url, None, error)
 
     # Wait for connection to succeed
@@ -51,11 +51,13 @@ def run_command(debugger, command, result, internal_dict):
     launchInfo = lldb.SBLaunchInfo(args_arr)
     global listener
     launchInfo.SetListener(listener)
-    
-    #This env variable makes NSLog, CFLog and os_log messages get mirrored to stderr
-    #https://stackoverflow.com/a/39581193 
-    launchInfo.SetEnvironmentEntries(['OS_ACTIVITY_DT_MODE=enable'], True)
-    
+
+    # This env variable makes NSLog, CFLog and os_log messages get mirrored to stderr
+    # https://stackoverflow.com/a/39581193
+    # Also, load the detox library
+    s = 'DYLD_INSERT_LIBRARIES={}/Detox.framework/Detox'.format(device_app)
+    launchInfo.SetEnvironmentEntries(['OS_ACTIVITY_DT_MODE=enable', s], True)
+
     lldb.target.Launch(launchInfo, error)
     lockedstr = ': Locked'
     if lockedstr in str(error):
@@ -82,12 +84,12 @@ def autoexit_command(debugger, command, result, internal_dict):
 
     detectDeadlockTimeout = {detect_deadlock_timeout}
     printBacktraceTime = time.time() + detectDeadlockTimeout if detectDeadlockTimeout > 0 else None
-    
+
     # This line prevents internal lldb listener from processing STDOUT/STDERR messages. Without it, an order of log writes is incorrect sometimes
     debugger.GetListener().StopListeningForEvents(process.GetBroadcaster(), lldb.SBProcess.eBroadcastBitSTDOUT | lldb.SBProcess.eBroadcastBitSTDERR )
 
     event = lldb.SBEvent()
-    
+
     def ProcessSTDOUT():
         stdout = process.GetSTDOUT(1024)
         while stdout:
@@ -99,18 +101,18 @@ def autoexit_command(debugger, command, result, internal_dict):
         while stderr:
             sys.stdout.write(stderr)
             stderr = process.GetSTDERR(1024)
-    
+
     while True:
         if listener.WaitForEvent(1, event) and lldb.SBProcess.EventIsProcessEvent(event):
             state = lldb.SBProcess.GetStateFromEvent(event)
             type = event.GetType()
-        
+
             if type & lldb.SBProcess.eBroadcastBitSTDOUT:
                 ProcessSTDOUT()
-        
+
             if type & lldb.SBProcess.eBroadcastBitSTDERR:
                 ProcessSTDERR()
-    
+
         else:
             state = process.GetState()
 
